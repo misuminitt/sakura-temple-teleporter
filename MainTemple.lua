@@ -1,8 +1,12 @@
-﻿-- GUI Start/Stop: cp1..cp16 -> RESPawn -> (3.0s) -> TeleportPart1 -> (3.0s) -> cp1 (loop)
--- Checkpoint tab: Pause/Resume + TP manual (CP1..16 & TP1) dengan auto-pause
--- Credit Made by misuminitt
--- Sakura Temple, Map Roblox
+--[[ 
+Sakura Temple Teleporter (Executor-Compatible)
+- Stripped Luau type annotations (pure Lua)
+- GUI auto-parent ke CoreGui/gethui() agar muncul saat loadstring
+- Fitur: Tabs (Main / Settings / Checkpoint), Start/Stop, Pause/Resume, Manual TP, Theme
+- Loop: CP1..CP16 (double TP) -> TeleportPart1 (once) -> Respawn -> delay -> repeat
+--]]
 
+-- ===== Services =====
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
@@ -10,13 +14,13 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 
--- ===== CONFIG RUNTIME =====
+-- ===== Config Runtime =====
 local STEP_DELAY = 2.9
 local DELAY_AFTER_RESPAWN = 3.0
 local DELAY_AFTER_TP1 = 3.0
 local MAX_CP = 16
 
--- ===== SETTINGS (can be change in setting tab) =====
+-- ===== Settings (editable from Settings tab) =====
 local Settings = {
 	MinimizeKey = Enum.KeyCode.RightControl,
 	Theme = "Dark", -- "Dark","Midnight","Emerald","Sunset"
@@ -30,23 +34,39 @@ local Themes = {
 	Sunset   = { bg=Color3.fromRGB(28,20,24),   accent=Color3.fromRGB(255,99,72),   good=Color3.fromRGB(254,149,120), bad=Color3.fromRGB(231,76,60), text=Color3.fromRGB(255,235,225), sub=Color3.fromRGB(230,210,205), hint=Color3.fromRGB(200,170,160) },
 }
 
--- ===== FORWARD DECLARATIONS =====
+-- ===== Forward declarations =====
 local setStatus
 local applyTheme
 local applyMinimize
 local teleportToCFrame
 
--- ===== HELPERS =====
+-- ===== Helpers =====
+local function getGuiParent()
+	-- Prioritaskan gethui/CoreGui agar UI tampil via executor
+	local ok, parent = pcall(function()
+		if gethui then return gethui() end
+		return game:GetService("CoreGui")
+	end)
+	if ok and parent then
+		return parent
+	end
+	-- fallback: PlayerGui (kalau CoreGui tidak bisa)
+	return player:WaitForChild("PlayerGui")
+end
+
 local function getCharacter()
 	return player.Character or player.CharacterAdded:Wait()
 end
+
 local function getHRP(char)
 	return char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart")
 end
+
 local function getHumanoid(char)
 	return char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid")
 end
-local function getCFrameFromNode(node: Instance): CFrame?
+
+local function getCFrameFromNode(node)
 	if not node then return nil end
 	if node:IsA("BasePart") then return node.CFrame end
 	if node:IsA("Model") then
@@ -65,7 +85,8 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "CPControllerGui"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
-screenGui.Parent = player:WaitForChild("PlayerGui")
+screenGui.Parent = getGuiParent()
+pcall(function() if syn and syn.protect_gui then syn.protect_gui(screenGui) end end)
 
 local theme = Themes[Settings.Theme]
 
@@ -78,15 +99,15 @@ bg.ClipsDescendants = true
 bg.Parent = screenGui
 Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 12)
 
--- ===== SIZE PER TAB =====
-local SIZE_MAIN       = UDim2.new(0, 360, 0, 320) 
-local SIZE_SETTINGS   = UDim2.new(0, 360, 0, 210) 
-local SIZE_CHECKPOINT = UDim2.new(0, 360, 0, 260) 
+-- Size per tab
+local SIZE_MAIN       = UDim2.new(0, 360, 0, 320)
+local SIZE_SETTINGS   = UDim2.new(0, 360, 0, 210)
+local SIZE_CHECKPOINT = UDim2.new(0, 360, 0, 260)
 
 bg.Size = SIZE_MAIN
 local expandedSize = bg.Size
 
--- ===== HEADER (DRAG AREA) =====
+-- Header (drag area)
 local header = Instance.new("Frame")
 header.Name = "Header"
 header.Size = UDim2.new(1, 0, 0, 36)
@@ -107,7 +128,7 @@ title.Text = "Checkpoint Teleporter"
 title.Parent = header
 title.ZIndex = 10
 
--- ===== WINDOWS BUTTONS =====
+-- Window buttons
 local btnMin = Instance.new("TextButton")
 btnMin.Size = UDim2.new(0, 36, 0, 24)
 btnMin.Position = UDim2.new(1, -84, 0.5, -12)
@@ -130,7 +151,7 @@ btnClose.Text = "×"
 btnClose.Parent = header
 Instance.new("UICorner", btnClose).CornerRadius = UDim.new(0, 6)
 
--- ===== TABS =====
+-- Tabs
 local tabs = Instance.new("Frame")
 tabs.Size = UDim2.new(1, -16, 0, 28)
 tabs.Position = UDim2.new(0, 8, 0, 40)
@@ -155,7 +176,7 @@ local tabMainBtn = makeTabButton("Main", 0)
 local tabSettingsBtn = makeTabButton("Settings", 108)
 local tabCheckpointBtn = makeTabButton("Checkpoint", 216)
 
--- ===== PAGES =====
+-- Pages
 local pages = Instance.new("Frame")
 pages.Size = UDim2.new(1, -16, 1, -84)
 pages.Position = UDim2.new(0, 8, 0, 72)
@@ -166,7 +187,7 @@ local mainPage = Instance.new("Frame");        mainPage.Size = UDim2.new(1,0,1,0
 local settingsPage = Instance.new("Frame");    settingsPage.Size = UDim2.new(1,0,1,0); settingsPage.BackgroundTransparency=1; settingsPage.Visible=false; settingsPage.Parent = pages
 local cpPage = Instance.new("Frame");          cpPage.Size = UDim2.new(1,0,1,0); cpPage.BackgroundTransparency=1; cpPage.Visible=false; cpPage.Parent = pages
 
--- ===== MAIN PAGE UI =====
+-- === MAIN PAGE UI ===
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -16, 0, 20)
 status.Position = UDim2.new(0, 8, 0, 0)
@@ -188,21 +209,20 @@ delayInfo.TextXAlignment = Enum.TextXAlignment.Left
 delayInfo.TextColor3 = theme.hint
 delayInfo.Parent = mainPage
 
--- ===== INFO DELAY =====
+-- Info delay
 local function updateDelayInfoText()
-	delayInfo.Text = ("CP Delay: %.2fs | After Respawn: %.2fs")
-		:format(STEP_DELAY, DELAY_AFTER_RESPAWN)
+	delayInfo.Text = ("CP Delay: %.2fs | After Respawn: %.2fs"):format(STEP_DELAY, DELAY_AFTER_RESPAWN)
 end
 updateDelayInfoText()
 
--- ===== CONTROL CHANGE DELAY (2 ROW) =====
+-- Control change delay (2 row)
 local delayRow = Instance.new("Frame")
-delayRow.Size = UDim2.new(1, -16, 0, 72)   -- 2 baris: 32 + 8 padding + 32
+delayRow.Size = UDim2.new(1, -16, 0, 72)
 delayRow.Position = UDim2.new(0, 8, 0, 60)
 delayRow.BackgroundTransparency = 1
 delayRow.Parent = mainPage
 
--- ===== ROW 1 =====
+-- Row 1
 local row1 = Instance.new("Frame")
 row1.Size = UDim2.new(1, 0, 0, 32)
 row1.BackgroundTransparency = 1
@@ -249,7 +269,7 @@ end
 local cpDelayBox      = makeLabeledBox(row1, "CP Delay (s)", STEP_DELAY)
 local respawnDelayBox = makeLabeledBox(row1, "After Respawn (s)", DELAY_AFTER_RESPAWN)
 
--- ===== ROW 2 =====
+-- Row 2 (Apply)
 local applyDelayBtn = Instance.new("TextButton")
 applyDelayBtn.Size = UDim2.new(0, 120, 0, 34)
 applyDelayBtn.Position = UDim2.new(0, 0, 0, 55)
@@ -277,10 +297,11 @@ applyDelayBtn.MouseButton1Click:Connect(function()
 	setStatus("Delays updated")
 end)
 
+-- Credit (pojok kanan bawah)
 local credit = Instance.new("TextLabel")
 credit.Size = UDim2.new(0, 180, 0, 18)
-credit.AnchorPoint = Vector2.new(1, 1)           
-credit.Position = UDim2.new(1, -10, 1, -4)       
+credit.AnchorPoint = Vector2.new(1, 1)
+credit.Position = UDim2.new(1, -10, 1, -4)
 credit.BackgroundTransparency = 1
 credit.Font = Enum.Font.Gotham
 credit.TextSize = 12
@@ -289,6 +310,7 @@ credit.TextColor3 = Color3.fromRGB(140,140,255)
 credit.Text = "made by misuminitt"
 credit.Parent = mainPage
 
+-- Start / Stop
 local startBtn = Instance.new("TextButton")
 startBtn.Size = UDim2.new(0, 170, 0, 34)
 startBtn.Position = UDim2.new(0, 7, 0, 170)
@@ -311,7 +333,7 @@ stopBtn.TextSize = 14
 stopBtn.Parent = mainPage
 Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0, 8)
 
--- ===== SETTINGS PAGE UI =====
+-- ===== SETTINGS PAGE =====
 local keyLabel = Instance.new("TextLabel")
 keyLabel.Size = UDim2.new(1, -16, 0, 18)
 keyLabel.Position = UDim2.new(0, 8, 0, 0)
@@ -364,6 +386,7 @@ local function makeThemeButton(name, x)
 	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
 	return b
 end
+
 local themeBtns = {
 	makeThemeButton("Dark", 0),
 	makeThemeButton("Midnight", 86),
@@ -389,7 +412,7 @@ pauseBtn.Text = "Pause Loop"
 pauseBtn.Parent = cpControls
 Instance.new("UICorner", pauseBtn).CornerRadius = UDim.new(0, 8)
 
--- ===== SCROLLING CONTAINER JUST FOR CHECKPOINT TAB =====
+-- Scroll container
 local cpScroll = Instance.new("ScrollingFrame")
 cpScroll.Name = "CpScroll"
 cpScroll.Size = UDim2.new(1, -16, 1, -44)
@@ -439,6 +462,7 @@ for i = 1, 16 do
 end
 local tp1Btn = makeCpButton("TP1")
 
+-- ===== Panel size helper =====
 local function setPanelSizeFor(tabName)
 	if Settings.Minimized then return end
 	if tabName == "Main" then
@@ -448,10 +472,10 @@ local function setPanelSizeFor(tabName)
 	elseif tabName == "Checkpoint" then
 		bg.Size = SIZE_CHECKPOINT
 	end
-	expandedSize = bg.Size -- sync restore
+	expandedSize = bg.Size
 end
 
--- ===== TAB SWITCHER =====
+-- ===== Tab switcher =====
 local function setActiveTab(name)
 	mainPage.Visible      = (name == "Main")
 	settingsPage.Visible  = (name == "Settings")
@@ -476,7 +500,7 @@ tabCheckpointBtn.MouseButton1Click:Connect(showCheckpoint)
 
 setActiveTab("Main")
 
--- ===== DRAGABLE HEADER =====
+-- ===== Draggable header =====
 do
 	local dragging=false; local dragStart; local startPos
 	header.InputBegan:Connect(function(input)
@@ -495,10 +519,10 @@ do
 	end)
 end
 
--- ===== MINIMIZE & CLOSE =====
+-- ===== Minimize & Close =====
 local collapsedHeight = 36
-
 local hidden = false
+
 btnClose.MouseButton1Click:Connect(function()
 	hidden = true
 	bg.Visible = false
@@ -556,46 +580,40 @@ UserInputService.InputBegan:Connect(function(input, gp)
 	end
 end)
 
+-- ===== Status setter =====
 setStatus = function(txt) status.Text = "Status: " .. txt end
 
--- ===== THEME =====
+-- ===== Theme =====
 applyTheme = function(name)
 	if not Themes[name] then return end
 	Settings.Theme = name
 	theme = Themes[name]
 
-	-- frame & header
 	bg.BackgroundColor3 = theme.bg
 	header.BackgroundColor3 = theme.bg
 	title.TextColor3 = theme.text
 
-	-- window buttons
 	btnMin.BackgroundColor3 = theme.accent
 	btnClose.BackgroundColor3 = theme.bad
 
-	-- tabs
 	tabMainBtn.BackgroundColor3 = theme.accent
 	tabSettingsBtn.BackgroundColor3 = theme.accent
 	tabCheckpointBtn.BackgroundColor3 = theme.accent
 
-	-- main page
 	status.TextColor3 = theme.sub
 	delayInfo.TextColor3 = theme.hint
 	if startBtn then startBtn.BackgroundColor3 = theme.good end
 	if stopBtn  then stopBtn.BackgroundColor3  = theme.bad  end
 
-	-- settings page
 	keyLabel.TextColor3 = theme.sub
 	keyBtn.BackgroundColor3 = theme.accent
 	themeLabel.TextColor3 = theme.sub
 
-	-- theme buttons
 	for _, b in ipairs(themeBtns) do
 		b.BackgroundColor3 = Themes[b.Text].accent
 		b.TextColor3 = Color3.new(1,1,1)
 	end
 
-	-- checkpoint tab
 	pauseBtn.BackgroundColor3 = theme.accent
 	pauseBtn.TextColor3 = Color3.new(1,1,1)
 	for _, b in ipairs(cpButtons) do
@@ -603,12 +621,10 @@ applyTheme = function(name)
 		b.TextColor3 = Color3.new(1,1,1)
 	end
 
-	-- scrollbar
 	if cpScroll then
 		cpScroll.ScrollBarImageColor3 = theme.hint
 	end
 
-	-- theme untuk kontrol delay (di tab Main)
 	if cpDelayBox and respawnDelayBox and applyDelayBtn then
 		cpDelayBox.BackgroundColor3 = theme.accent
 		cpDelayBox.TextColor3 = Color3.new(1,1,1)
@@ -624,8 +640,8 @@ for _, b in ipairs(themeBtns) do
 end
 applyTheme(Settings.Theme)
 
--- ===== TELEPORT UTILS =====
-teleportToCFrame = function(cf: CFrame)
+-- ===== Teleport utils =====
+teleportToCFrame = function(cf)
 	local char = getCharacter()
 	local hrp = getHRP(char)
 	local up = Vector3.new(0, 3, 0)
@@ -633,7 +649,7 @@ teleportToCFrame = function(cf: CFrame)
 	return hrp
 end
 
--- ===== LOOP CONTROL =====
+-- ===== Loop control =====
 local state = { running = false }
 
 local function waitDelayCancellable(sec)
@@ -653,7 +669,7 @@ local function respawnAvatar()
 end
 
 -- helper: teleport 2x ke satu tujuan
-local function tpTwiceTo(cf: CFrame, label: string)
+local function tpTwiceTo(cf, label)
 	setStatus(("Teleport → %s (1/2)"):format(label))
 	teleportToCFrame(cf)
 	waitDelayCancellable(STEP_DELAY)
@@ -722,7 +738,7 @@ local function stopLoop()
 	setStatus("Stopping…")
 end
 
--- ===== PAUSE & RESUME =====
+-- ===== Pause/Resume + Manual TP =====
 local function updatePauseBtn()
 	if state.running then pauseBtn.Text = "Pause Loop" else pauseBtn.Text = "Resume Loop" end
 end
@@ -781,7 +797,7 @@ for i = 1, 16 do
 end
 tp1Btn.MouseButton1Click:Connect(tpToTP1)
 
--- ===== KEYBIND CAPTURE =====
+-- ===== Keybind capture =====
 local listening = false
 keyBtn.MouseButton1Click:Connect(function()
 	if listening then return end
