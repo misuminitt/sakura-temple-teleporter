@@ -23,7 +23,7 @@ local MAX_CP = 16
 -- ===== Settings (editable from Settings tab) =====
 local Settings = {
 	MinimizeKey = Enum.KeyCode.RightControl,
-	Theme = "Dark", -- "Dark","Midnight","Emerald","Sunset"
+	Theme = "Dark",
 	Minimized = false,
 }
 
